@@ -4,6 +4,8 @@ import Topbar from './components/layout/Topbar'
 import Dashboard from './pages/Dashboard'
 import Predict from './pages/Predict'
 import Reports from './pages/Reports'
+import Trends from './pages/Trends'
+import ModelMetrics from './pages/ModelMetrics'
 
 export default function App() {
   const [page, setPage] = useState('dashboard')
@@ -17,7 +19,10 @@ export default function App() {
         {page === 'dashboard' && <Dashboard predictionData={predictionData} />}
         {page === 'predict'   && <Predict setPredictionData={setPredictionData} />}
         {page === 'reports'   && <Reports predictionData={predictionData} />}
-        {!['dashboard','predict','reports'].includes(page) && (
+        {page === 'trends'    && <Trends />}
+        {page === 'model'     && <ModelMetrics />}
+        {page === 'history'   && <Trends />}
+        {!['dashboard','predict','reports','trends','model','history'].includes(page) && (
           <div style={{ padding: '60px 24px', textAlign: 'center', color: 'rgba(15,23,42,0.3)', fontSize: 14 }}>
             This section is coming soon.
           </div>

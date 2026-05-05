@@ -261,6 +261,22 @@ export default function Predict({ setPredictionData }) {
     predict(data, (result) => {
       // Pass prediction data to Dashboard
       setPredictionData({ ...data, ...result })
+
+      // Save to localStorage for history & trend tracking
+      try {
+        const history = JSON.parse(localStorage.getItem('vitals_history') || '[]')
+        history.push({
+          id: Date.now(),
+          timestamp: new Date().toISOString(),
+          input: data,
+          result: result,
+        })
+        // Keep last 50 entries
+        if (history.length > 50) history.splice(0, history.length - 50)
+        localStorage.setItem('vitals_history', JSON.stringify(history))
+      } catch (e) {
+        console.error('Failed to save prediction history:', e)
+      }
     })
   }
 

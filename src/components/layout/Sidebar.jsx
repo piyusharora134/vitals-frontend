@@ -1,6 +1,6 @@
 import {
   Activity, LayoutDashboard, Brain, TrendingUp,
-  Database, Clock, FileText, Settings, Coffee, BookOpen
+  Database, Clock, FileText
 } from 'lucide-react'
 
 const navSections = [
@@ -16,15 +16,8 @@ const navSections = [
     label: 'Analysis',
     items: [
       { id: 'model',   icon: Database, label: 'Model Metrics' },
-      { id: 'history', icon: Clock,    label: 'History',  badge: '12' },
+      { id: 'history', icon: Clock,    label: 'History' },
       { id: 'reports', icon: FileText, label: 'Reports' },
-    ],
-  },
-  {
-    label: 'System',
-    items: [
-      { id: 'settings', icon: Settings, label: 'Settings' },
-      { id: 'api',      icon: BookOpen, label: 'API Docs' },
     ],
   },
 ]

@@ -1,6 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Chart, registerables } from 'chart.js'
+import { Activity, CheckCircle2, Users, Zap, Clock } from 'lucide-react'
 Chart.register(...registerables)
+
+// ── Helper: read prediction history from localStorage ─────────────────────────
+function getHistory() {
+  try {
+    return JSON.parse(localStorage.getItem('vitals_history') || '[]')
+  } catch { return [] }
+}
 
 // ── Stat Card ─────────────────────────────────────────────────────────────────
 function StatCard({ icon: Icon, iconBg, label, value, delta, deltaUp }) {
@@ -35,31 +43,45 @@ function StatCard({ icon: Icon, iconBg, label, value, delta, deltaUp }) {
   )
 }
 
-// ── Trend Chart ───────────────────────────────────────────────────────────────
+// ── Trend Chart (reads real data from localStorage) ──────────────────────────
 function TrendChart() {
   const ref = useRef(null)
   const chartRef = useRef(null)
 
   useEffect(() => {
     if (chartRef.current) chartRef.current.destroy()
-    const days = Array.from({ length: 14 }, (_, i) => {
-      const d = new Date(); d.setDate(d.getDate() - 13 + i)
-      return d.toLocaleDateString('en', { month: 'short', day: 'numeric' })
-    })
-    const data = [0.18, 0.22, 0.19, 0.28, 0.25, 0.31, 0.27, 0.24, 0.33, 0.29, 0.21, 0.26, 0.19, 0.23]
+
+    const history = getHistory()
+
+    // If we have real predictions, use them. Otherwise show empty.
+    let labels = []
+    let data = []
+
+    if (history.length > 0) {
+      // Take last 20 entries max for the dashboard view
+      const recent = history.slice(-20)
+      labels = recent.map(h => {
+        const d = new Date(h.timestamp)
+        return d.toLocaleDateString('en', { month: 'short', day: 'numeric' }) + ' ' +
+               d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })
+      })
+      data = recent.map(h => h.result?.probability ?? 0)
+    }
+
     chartRef.current = new Chart(ref.current, {
       type: 'line',
       data: {
-        labels: days,
+        labels: labels.length ? labels : ['No data yet'],
         datasets: [{
-          data,
+          data: data.length ? data : [0],
           borderColor: '#0fa88a',
           backgroundColor: 'rgba(15,168,138,0.08)',
           borderWidth: 2,
-          pointRadius: 3,
+          pointRadius: data.length ? 4 : 0,
           pointBackgroundColor: '#0fa88a',
           pointBorderColor: 'white',
           pointBorderWidth: 1.5,
+          pointHoverRadius: 6,
           fill: true,
           tension: 0.4,
         }],
@@ -68,19 +90,22 @@ function TrendChart() {
         responsive: true, maintainAspectRatio: false,
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: ctx => ` ${(ctx.raw * 100).toFixed(1)}% risk` } },
+          tooltip: {
+            enabled: data.length > 0,
+            callbacks: { label: ctx => ` ${(ctx.raw * 100).toFixed(1)}% risk` },
+          },
         },
         scales: {
           x: {
             grid: { display: false },
-            ticks: { font: { size: 10 }, color: 'rgba(15,23,42,0.4)' },
+            ticks: { font: { size: 10 }, color: 'rgba(15,23,42,0.4)', maxRotation: 45 },
             border: { display: false },
           },
           y: {
             grid: { color: 'rgba(15,23,42,0.04)' },
             border: { display: false },
             ticks: { font: { size: 10 }, color: 'rgba(15,23,42,0.4)', callback: v => (v * 100).toFixed(0) + '%' },
-            min: 0, max: 0.6,
+            min: 0, max: 1,
           },
         },
       },
@@ -88,11 +113,32 @@ function TrendChart() {
     return () => chartRef.current?.destroy()
   }, [])
 
-  return <canvas ref={ref} />
+  const history = getHistory()
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <canvas ref={ref} />
+      {history.length === 0 && (
+        <div style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(248,250,252,0.8)', borderRadius: 8,
+        }}>
+          <div style={{ fontSize: 24, marginBottom: 6 }}>📊</div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: 'rgba(15,23,42,0.4)' }}>
+            No predictions yet
+          </div>
+          <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.3)', marginTop: 2 }}>
+            Go to Risk Predict to generate your first assessment
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Donut Chart ───────────────────────────────────────────────────────────────
-function DonutChart() {
+function DonutChart({ distribution }) {
   const ref = useRef(null)
   const chartRef = useRef(null)
 
@@ -102,7 +148,7 @@ function DonutChart() {
       type: 'doughnut',
       data: {
         datasets: [{
-          data: [68, 21, 11],
+          data: [distribution.low, distribution.moderate, distribution.high],
           backgroundColor: ['#0fa88a', '#d97706', '#e11d48'],
           borderColor: 'white',
           borderWidth: 3,
@@ -118,7 +164,7 @@ function DonutChart() {
       },
     })
     return () => chartRef.current?.destroy()
-  }, [])
+  }, [distribution])
 
   return <canvas ref={ref} width={160} height={160} style={{ maxWidth: 160 }} />
 }
@@ -138,46 +184,80 @@ function MetricRow({ label, value, color }) {
   )
 }
 
-// ── Alert Item ────────────────────────────────────────────────────────────────
-function AlertItem({ color, bg, border, text, time, textColor }) {
+// ── Prediction History Item ──────────────────────────────────────────────────
+function HistoryItem({ entry }) {
+  const prob = (entry.result.probability * 100).toFixed(1)
+  const level = entry.result.risk_level
+  const colorMap = {
+    'Low Risk': { color: '#059669', bg: '#f0fdf4', border: '#bbf7d0', dot: '#0fa88a' },
+    'Moderate Risk': { color: '#92400e', bg: '#fffbeb', border: '#fde68a', dot: '#d97706' },
+    'High Risk': { color: '#9f1239', bg: '#fff1f2', border: '#fecdd3', dot: '#e11d48' },
+  }
+  const s = colorMap[level] || colorMap['Low Risk']
+  const d = new Date(entry.timestamp)
+  const timeStr = d.toLocaleDateString('en', { month: 'short', day: 'numeric' }) + ' · ' +
+                  d.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })
+
   return (
     <div style={{
-      display: 'flex', alignItems: 'flex-start', gap: 10,
+      display: 'flex', alignItems: 'center', gap: 10,
       padding: '10px 12px', borderRadius: 9,
-      background: bg, border: `1px solid ${border}`,
+      background: s.bg, border: `1px solid ${s.border}`,
     }}>
-      <div style={{ width: 8, height: 8, borderRadius: '50%', background: color, flexShrink: 0, marginTop: 3 }} />
-      <div>
-        <div style={{ fontSize: 12, lineHeight: 1.5, color: textColor }}>{text}</div>
-        <div style={{ fontSize: 10, marginTop: 2, opacity: 0.6, color: textColor }}>{time}</div>
+      <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.dot, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 500, color: s.color, lineHeight: 1.5 }}>
+          {level} — <span style={{ fontFamily: 'DM Mono, monospace', fontWeight: 600 }}>{prob}%</span>
+        </div>
+        <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.45)', marginTop: 1 }}>
+          Age {entry.input.age} · BMI {entry.input.bmi} · BP {entry.input.blood_pressure}
+        </div>
+      </div>
+      <div style={{ fontSize: 10, color: 'rgba(15,23,42,0.35)', flexShrink: 0, textAlign: 'right' }}>
+        {timeStr}
       </div>
     </div>
   )
 }
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
-import { Activity, CheckCircle2, Users, Zap } from 'lucide-react'
-
 export default function Dashboard({ predictionData }) {
+  const [history] = useState(() => getHistory())
+
+  // Compute distribution from history
+  const distribution = (() => {
+    if (history.length === 0) return { low: 68, moderate: 21, high: 11 } // defaults
+    const counts = { low: 0, moderate: 0, high: 0 }
+    history.forEach(h => {
+      const level = h.result?.risk_level
+      if (level === 'Low Risk') counts.low++
+      else if (level === 'Moderate Risk') counts.moderate++
+      else if (level === 'High Risk') counts.high++
+    })
+    const total = counts.low + counts.moderate + counts.high || 1
+    return {
+      low: Math.round(counts.low / total * 100),
+      moderate: Math.round(counts.moderate / total * 100),
+      high: Math.round(counts.high / total * 100),
+    }
+  })()
+
+  const dominantRisk = distribution.low >= distribution.moderate && distribution.low >= distribution.high ? 'Low'
+    : distribution.moderate >= distribution.high ? 'Moderate' : 'High'
+
   const statCards = [
-    { icon: Activity, iconBg: 'linear-gradient(135deg,#0fa88a,#14b8a6)', label: 'Model Accuracy',    value: '83.4%',  delta: '↑ 2.1%', deltaUp: true  },
-    { icon: CheckCircle2, iconBg: 'linear-gradient(135deg,#2563eb,#3b82f6)', label: 'ROC-AUC Score', value: '0.924',  delta: '↑ 0.03', deltaUp: true  },
-    { icon: Users,    iconBg: 'linear-gradient(135deg,#7c3aed,#8b5cf6)', label: 'Dataset Records',   value: '20,482', delta: '+248',    deltaUp: true  },
+    { icon: Activity, iconBg: 'linear-gradient(135deg,#0fa88a,#14b8a6)', label: 'Model Accuracy',    value: '83.5%',  delta: '↑ 2.1%', deltaUp: true  },
+    { icon: CheckCircle2, iconBg: 'linear-gradient(135deg,#2563eb,#3b82f6)', label: 'ROC-AUC Score', value: '0.916',  delta: '↑ 0.03', deltaUp: true  },
+    { icon: Users,    iconBg: 'linear-gradient(135deg,#7c3aed,#8b5cf6)', label: 'Predictions Made',  value: String(history.length), delta: history.length > 0 ? `+${Math.min(history.length, 10)}` : '—', deltaUp: history.length > 0  },
     { icon: Zap,      iconBg: 'linear-gradient(135deg,#d97706,#f59e0b)', label: 'Inference Latency', value: '<92ms',  delta: '↓ 3ms',  deltaUp: false },
   ]
 
   const metrics = [
     { label: 'Accuracy',    value: 83, color: 'linear-gradient(90deg,#0fa88a,#14b8a6)' },
     { label: 'ROC-AUC',     value: 92, color: 'linear-gradient(90deg,#2563eb,#3b82f6)' },
-    { label: 'Sensitivity', value: 87, color: 'linear-gradient(90deg,#7c3aed,#8b5cf6)' },
-    { label: 'Specificity', value: 80, color: 'linear-gradient(90deg,#d97706,#f59e0b)' },
-    { label: 'F1-Score',    value: 85, color: 'linear-gradient(90deg,#e11d48,#f43f5e)' },
-  ]
-
-  const alerts = [
-    { color: '#e11d48', bg: '#fff1f2', border: '#fecdd3', textColor: '#9f1239', text: 'High Risk patient flag — BMI 34.2, BP 158mmHg detected', time: '2 min ago' },
-    { color: '#d97706', bg: '#fffbeb', border: '#fde68a', textColor: '#92400e', text: 'Model retrain suggested — 248 new records available',          time: '1 hour ago' },
-    { color: '#059669', bg: '#f0fdf4', border: '#bbf7d0', textColor: '#065f46', text: 'Flask API healthy — uptime 99.7% (last 24h)',                   time: 'Online' },
+    { label: 'Sensitivity', value: 86, color: 'linear-gradient(90deg,#7c3aed,#8b5cf6)' },
+    { label: 'Specificity', value: 83, color: 'linear-gradient(90deg,#d97706,#f59e0b)' },
+    { label: 'F1-Score',    value: 84, color: 'linear-gradient(90deg,#e11d48,#f43f5e)' },
   ]
 
   const ensemble = [
@@ -187,12 +267,8 @@ export default function Dashboard({ predictionData }) {
     { pct: '15%', label: 'Log. Regression',   color: '#d97706' },
   ]
 
-  const cloudTags = [
-    { text: 'Firebase Auth', bg: '#e6f7f4', color: '#0fa88a' },
-    { text: 'Firestore DB',  bg: '#eff6ff', color: '#2563eb' },
-    { text: 'Render.com',    bg: '#f5f3ff', color: '#7c3aed' },
-    { text: 'Supabase',      bg: '#fffbeb', color: '#d97706' },
-  ]
+  // Most recent 6 predictions for the history card
+  const recentHistory = [...history].reverse().slice(0, 6)
 
   return (
     <div style={{ padding: '22px 24px 40px' }}>
@@ -210,11 +286,21 @@ export default function Dashboard({ predictionData }) {
           <div style={cardHeader}>
             <div>
               <div style={cardTitle}>Risk Probability Trend</div>
-              <div style={cardSub}>Daily ensemble predictions (last 14 days)</div>
+              <div style={cardSub}>
+                {history.length > 0
+                  ? `Tracking ${history.length} prediction${history.length !== 1 ? 's' : ''}`
+                  : 'Real-time tracking of your predictions'
+                }
+              </div>
             </div>
-            <select style={{ fontSize: 12, border: '1px solid rgba(15,23,42,0.1)', borderRadius: 6, padding: '4px 8px', background: '#f8fafc', color: 'rgba(15,23,42,0.6)', outline: 'none' }}>
-              <option>14 Days</option><option>30 Days</option>
-            </select>
+            {history.length > 0 && (
+              <div style={{
+                fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 6,
+                background: '#e6f7f4', color: '#0fa88a',
+              }}>
+                Live Data
+              </div>
+            )}
           </div>
           <div style={{ padding: '16px 18px' }}>
             <div style={{ position: 'relative', height: 200 }}>
@@ -228,19 +314,23 @@ export default function Dashboard({ predictionData }) {
           <div style={cardHeader}>
             <div>
               <div style={cardTitle}>Risk Distribution</div>
-              <div style={cardSub}>Current session breakdown</div>
+              <div style={cardSub}>
+                {history.length > 0 ? 'Based on your predictions' : 'Default distribution'}
+              </div>
             </div>
           </div>
           <div style={{ padding: '16px 18px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160, position: 'relative' }}>
-              <DonutChart />
+              <DonutChart distribution={distribution} />
               <div style={{ position: 'absolute', textAlign: 'center' }}>
-                <div style={{ fontSize: 26, fontWeight: 600, letterSpacing: -1, fontFamily: 'DM Mono, monospace', color: '#0f172a' }}>68%</div>
-                <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', marginTop: 2 }}>Low Risk</div>
+                <div style={{ fontSize: 26, fontWeight: 600, letterSpacing: -1, fontFamily: 'DM Mono, monospace', color: '#0f172a' }}>
+                  {distribution[dominantRisk.toLowerCase()]}%
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)', marginTop: 2 }}>{dominantRisk} Risk</div>
               </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 12 }}>
-              {[['68%','Low','#059669'],['21%','Moderate','#d97706'],['11%','High','#e11d48']].map(([v,l,c]) => (
+              {[[`${distribution.low}%`,'Low','#059669'],[`${distribution.moderate}%`,'Moderate','#d97706'],[`${distribution.high}%`,'High','#e11d48']].map(([v,l,c]) => (
                 <div key={l} style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 16, fontWeight: 600, color: c }}>{v}</div>
                   <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.4)' }}>{l}</div>
@@ -283,30 +373,55 @@ export default function Dashboard({ predictionData }) {
           </div>
         </div>
 
-        {/* Alerts + Cloud */}
+        {/* Prediction History (replaces System Alerts) */}
         <div style={card}>
           <div style={{ ...cardHeader, alignItems: 'center' }}>
             <div>
-              <div style={cardTitle}>System Alerts</div>
-              <div style={cardSub}>Recent activity & recommendations</div>
+              <div style={cardTitle}>Recent Predictions</div>
+              <div style={cardSub}>Your latest health assessments</div>
             </div>
-            <span style={{ background: '#e11d48', color: 'white', fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 10 }}>3</span>
+            {history.length > 0 && (
+              <span style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                background: '#e6f7f4', color: '#0fa88a',
+                fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 10,
+              }}>
+                <Clock size={10} />
+                {history.length}
+              </span>
+            )}
           </div>
           <div style={{ padding: '16px 18px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {alerts.map((a, i) => <AlertItem key={i} {...a} />)}
-            </div>
-
-            <div style={{ marginTop: 16, padding: '12px 14px', background: 'linear-gradient(135deg,#f0fdf4,#eff6ff)', borderRadius: 10, border: '1px solid rgba(15,23,42,0.06)' }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>☁ Cloud Integration (Free Tier)</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                {cloudTags.map(t => (
-                  <span key={t.text} style={{ background: t.bg, color: t.color, fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 5 }}>
-                    {t.text}
-                  </span>
+            {recentHistory.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {recentHistory.map(entry => (
+                  <HistoryItem key={entry.id} entry={entry} />
                 ))}
+                {history.length > 6 && (
+                  <div style={{
+                    fontSize: 11, color: 'rgba(15,23,42,0.35)', textAlign: 'center',
+                    padding: '6px', marginTop: 4,
+                  }}>
+                    + {history.length - 6} more predictions in history
+                  </div>
+                )}
               </div>
-            </div>
+            ) : (
+              <div style={{
+                padding: '40px 20px', textAlign: 'center',
+                background: '#f8fafc', borderRadius: 10,
+                border: '1px dashed rgba(15,23,42,0.12)',
+              }}>
+                <div style={{ fontSize: 28, marginBottom: 8 }}>🔬</div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'rgba(15,23,42,0.4)', marginBottom: 4 }}>
+                  No predictions yet
+                </div>
+                <div style={{ fontSize: 11, color: 'rgba(15,23,42,0.3)', lineHeight: 1.5 }}>
+                  Run your first health risk assessment from the Predict page
+                  to see your history here.
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

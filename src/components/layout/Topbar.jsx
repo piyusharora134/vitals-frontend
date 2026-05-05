@@ -1,14 +1,10 @@
-import { Bell, Search } from 'lucide-react'
-
 const pageTitles = {
   dashboard: 'Health Dashboard',
   predict:   'Risk Assessment',
-  trends:    'Trends',
+  trends:    'Prediction Trends',
   model:     'Model Metrics',
   history:   'History',
   reports:   'Reports',
-  settings:  'Settings',
-  api:       'API Docs',
 }
 
 export default function Topbar({ page }) {
@@ -36,16 +32,6 @@ export default function Topbar({ page }) {
           }} />
           Backend live
         </div>
-
-        {/* Bell */}
-        <div style={iconBtn}>
-          <Bell size={15} strokeWidth={1.8} color="rgba(15,23,42,0.6)" />
-        </div>
-
-        {/* Search */}
-        <div style={iconBtn}>
-          <Search size={15} strokeWidth={1.8} color="rgba(15,23,42,0.6)" />
-        </div>
       </div>
 
       <style>{`
@@ -56,11 +42,4 @@ export default function Topbar({ page }) {
       `}</style>
     </div>
   )
-}
-
-const iconBtn = {
-  width: 32, height: 32,
-  background: '#f8fafc', border: '1px solid rgba(15,23,42,0.08)',
-  borderRadius: 8, display: 'flex', alignItems: 'center',
-  justifyContent: 'center', cursor: 'pointer',
 }
